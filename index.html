@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CricCoach AI - Professional Digital Coach</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
+    <script src="https://unpkg.com/ml5@latest/dist/ml5.min.js"></script>
+    
+    <style>
+        :root {
+            --primary: #1a472a; /* Cricket Green */
+            --accent: #f4d03f; /* Gold/Yellow */
+            --dark: #121212;
+            --light: #f5f5f5;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--dark);
+            color: var(--light);
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        header {
+            width: 100%;
+            background-color: var(--primary);
+            padding: 20px;
+            text-align: center;
+            border-bottom: 4px solid var(--accent);
+        }
+
+        h1 { margin: 0; font-size: 2.5rem; letter-spacing: 2px; }
+        .tagline { color: var(--accent); font-style: italic; }
+
+        .controls {
+            margin: 20px;
+            display: flex;
+            gap: 20px;
+        }
+
+        button {
+            padding: 15px 30px;
+            font-size: 1.2rem;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: bold;
+        }
+
+        .btn-bat { background-color: #fff; color: var(--primary); border: 2px solid var(--primary); }
+        .btn-bowl { background-color: var(--accent); color: var(--dark); }
+        .btn-active { transform: scale(1.05); box-shadow: 0 0 15px rgba(255,255,255,0.5); }
+
+        .main-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 20px;
+            width: 90%;
+            max-width: 1200px;
+        }
+
+        #canvas-container {
+            position: relative;
+            border: 4px solid var(--accent);
+            border-radius: 10px;
+            overflow: hidden;
+            width: 640px;
+            height: 480px;
+            background: #000;
+        }
+
+        .analysis-panel {
+            flex: 1;
+            min-width: 300px;
+            background-color: #1e1e1e;
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 5px solid var(--primary);
+        }
+
+        .panel-header { font-size: 1.5rem; color: var(--accent); margin-bottom: 15px; border-bottom: 1px solid #444; padding-bottom: 10px; }
+        
+        .feedback-item {
+            margin-bottom: 15px;
+            padding: 10px;
+            background: #2a2a2a;
+            border-radius: 5px;
+        }
+
+        .feedback-label { color: #888; font-size: 0.9rem; text-transform: uppercase; }
+        .feedback-value { font-size: 1.1rem; font-weight: bold; margin-top: 5px; }
+        
+        .status-good { color: #2ecc71; }
+        .status-warn { color: #e74c3c; }
+
+        /* Loader */
+        #loading { font-size: 1.5rem; color: var(--accent); margin-top: 50px; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>CricCoach AI</h1>
+        <p class="tagline">Your Professional Digital Cricket Analyst</p>
+    </header>
+
+    <div class="controls">
+        <button id="batBtn" class="btn-bat" onclick="setMode('batting')">🏏 Batting Coach</button>
+        <button id="bowlBtn" class="btn-bowl" onclick="setMode('bowling')">⚾ Bowling Coach</button>
+    </div>
+
+    <div id="loading">Initializing Neural Network... Please wait.</div>
+
+    <div class="main-container" id="dashboard" style="display:none;">
+        
+        <div id="canvas-container"></div>
+
+        <div class="analysis-panel">
+            <div class="panel-header" id="mode-title">Batting Analysis</div>
+            
+            <div class="feedback-item">
+                <div class="feedback-label">Stance / Form</div>
+                <div class="feedback-value" id="stance-feedback">Analyzing...</div>
+            </div>
+
+            <div class="feedback-item">
+                <div class="feedback-label">Technical Tip</div>
+                <div class="feedback-value" id="tech-tip">Get into position.</div>
+            </div>
+
+            <div class="feedback-item">
+                <div class="feedback-label">AI Confidence</div>
+                <div class="feedback-value" id="confidence-score">0%</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let video;
+        let poseNet;
+        let poses = [];
+        let currentMode = 'batting'; // 'batting' or 'bowling'
+        let canvas;
+        
+        // Setup p5.js
+        function setup() {
+            // Create canvas and attach to container
+            canvas = createCanvas(640, 480);
+            canvas.parent('canvas-container');
+            
+            // Capture video
+            video = createCapture(VIDEO);
+            video.size(width, height);
+            video.hide(); // Hide the raw HTML video element
+
+            // Initialize PoseNet
+            poseNet = ml5.poseNet(video, modelReady);
+            
+            // Listen to new 'pose' events
+            poseNet.on('pose', function(results) {
+                poses = results;
+                analyzePose();
+            });
+        }
+
+        function modelReady() {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('dashboard').style.display = 'flex';
+            select('#status').html('Model Loaded');
+        }
+
+        function draw() {
+            // Draw video to canvas
+            image(video, 0, 0, width, height);
+
+            // Draw skeleton overlays
+            drawKeypoints();
+            drawSkeleton();
+        }
+
+        function setMode(mode) {
+            currentMode = mode;
+            document.getElementById('mode-title').innerText = mode.charAt(0).toUpperCase() + mode.slice(1) + " Analysis";
+            
+            // Toggle active styling
+            if(mode === 'batting') {
+                document.getElementById('batBtn').classList.add('btn-active');
+                document.getElementById('bowlBtn').classList.remove('btn-active');
+            } else {
+                document.getElementById('bowlBtn').classList.add('btn-active');
+                document.getElementById('batBtn').classList.remove('btn-active');
+            }
+        }
+
+        // --- THE AI COACHING LOGIC ---
+        function analyzePose() {
+            if (poses.length > 0) {
+                let pose = poses[0].pose;
+                let score = pose.score;
+
+                document.getElementById('confidence-score').innerText = Math.round(score * 100) + "%";
+
+                if (currentMode === 'batting') {
+                    analyzeBatting(pose);
+                } else {
+                    analyzeBowling(pose);
+                }
+            }
+        }
+
+        function analyzeBatting(pose) {
+            const leftShoulder = pose.leftShoulder;
+            const rightShoulder = pose.rightShoulder;
+            const leftKnee = pose.leftKnee;
+            const rightKnee = pose.rightKnee;
+
+            let stanceMsg = document.getElementById('stance-feedback');
+            let tipMsg = document.getElementById('tech-tip');
+
+            // 1. Check Stance (Are knees bent?)
+            // We compare shoulder Y vs Knee Y. If distance is small, knees are likely straight.
+            let avgShoulderY = (leftShoulder.y + rightShoulder.y) / 2;
+            let avgKneeY = (leftKnee.y + rightKnee.y) / 2;
+            let heightDiff = avgKneeY - avgShoulderY;
+
+            if (heightDiff > 250) { 
+                stanceMsg.innerHTML = "<span class='status-good'>Good Knee Bend</span>";
+                tipMsg.innerText = "Head still. Watch the ball closely.";
+            } else {
+                stanceMsg.innerHTML = "<span class='status-warn'>Too Upright!</span>";
+                tipMsg.innerText = "Bend your knees to access low bouncing balls.";
+            }
+            
+            // 2. Head Position (Nose relative to shoulders)
+            // Ideally head should be centered or slightly leading
+        }
+
+        function analyzeBowling(pose) {
+            const rightWrist = pose.rightWrist;
+            const rightShoulder = pose.rightShoulder;
+            const nose = pose.nose;
+
+            let stanceMsg = document.getElementById('stance-feedback');
+            let tipMsg = document.getElementById('tech-tip');
+
+            // Simple logic: Is the arm high? (Wrist above nose)
+            if (rightWrist.y < nose.y) {
+                stanceMsg.innerHTML = "<span class='status-good'>High Arm Action</span>";
+                tipMsg.innerText = "Great release point! Snap the wrist.";
+            } else {
+                stanceMsg.innerHTML = "<span class='status-warn'>Arm too Low</span>";
+                tipMsg.innerText = "Get your arm higher for better bounce.";
+            }
+        }
+
+        // --- DRAWING FUNCTIONS (SKELETON) ---
+        function drawKeypoints()  {
+            for (let i = 0; i < poses.length; i++) {
+                let pose = poses[i].pose;
+                for (let j = 0; j < pose.keypoints.length; j++) {
+                    let keypoint = pose.keypoints[j];
+                    if (keypoint.score > 0.2) {
+                        fill(244, 208, 63); // Gold color
+                        noStroke();
+                        ellipse(keypoint.position.x, keypoint.position.y, 10, 10);
+                    }
+                }
+            }
+        }
+
+        function drawSkeleton() {
+            for (let i = 0; i < poses.length; i++) {
+                let skeleton = poses[i].skeleton;
+                for (let j = 0; j < skeleton.length; j++) {
+                    let partA = skeleton[j][0];
+                    let partB = skeleton[j][1];
+                    stroke(255);
+                    strokeWeight(2);
+                    line(partA.position.x, partA.position.y, partB.position.x, partB.position.y);
+                }
+            }
+        }
+    </script>
+</body>
+</html>
