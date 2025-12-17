@@ -1,0 +1,172 @@
+    let video;
+    let poseNet;
+    let poses = [];
+    let currentMode = 'batting';
+    let canvas;
+    
+    function setup() {
+        canvas = createCanvas(640, 480);
+        canvas.parent('canvas-container');
+        
+        video = createCapture(VIDEO);
+        video.size(width, height);
+        video.hide();
+
+        // Initialize PoseNet
+        poseNet = ml5.poseNet(video, modelReady);
+        
+        poseNet.on('pose', function(results) {
+            poses = results;
+            analyzePose();
+        });
+
+        // Set initial visual state for buttons
+        document.getElementById('batBtn').classList.add('btn-active');
+    }
+
+    function modelReady() {
+        // FIXED: Removed the select('#status') line that caused errors
+        let loader = document.getElementById('loading');
+        loader.style.display = 'none'; 
+        document.getElementById('dashboard').style.display = 'flex';
+    }
+
+    function draw() {
+        // Mirror the video for a more natural "mirror" feel
+        push();
+        translate(width, 0);
+        scale(-1, 1);
+        image(video, 0, 0, width, height);
+        drawKeypoints();
+        drawSkeleton();
+        pop();
+    }
+
+    function setMode(mode) {
+        currentMode = mode;
+        document.getElementById('mode-title').innerText = mode.charAt(0).toUpperCase() + mode.slice(1) + " Analysis";
+        
+        if(mode === 'batting') {
+            document.getElementById('batBtn').classList.add('btn-active');
+            document.getElementById('bowlBtn').classList.remove('btn-active');
+        } else {
+            document.getElementById('bowlBtn').classList.add('btn-active');
+            document.getElementById('batBtn').classList.remove('btn-active');
+        }
+        
+        // Reset feedback when switching modes
+        document.getElementById('stance-feedback').innerText = "Analyzing...";
+        document.getElementById('tech-tip').innerText = "Get into position.";
+    }
+
+    function analyzePose() {
+        if (poses.length > 0) {
+            let pose = poses[0].pose;
+            let score = pose.score;
+
+            // Only analyze if the AI is somewhat confident (e.g. > 20%)
+            if(score > 0.2) {
+                document.getElementById('confidence-score').innerText = Math.round(score * 100) + "%";
+                
+                if (currentMode === 'batting') {
+                    analyzeBatting(pose);
+                } else {
+                    analyzeBowling(pose);
+                }
+            }
+        }
+    }
+
+    function analyzeBatting(pose) {
+        const leftShoulder = pose.leftShoulder;
+        const rightShoulder = pose.rightShoulder;
+        const leftKnee = pose.leftKnee;
+        const rightKnee = pose.rightKnee;
+
+        let stanceMsg = document.getElementById('stance-feedback');
+        let tipMsg = document.getElementById('tech-tip');
+
+        // IMPROVED LOGIC: Use Ratios, not fixed pixels
+        // 1. Calculate how tall the torso+thigh is (approx)
+        let avgShoulderY = (leftShoulder.y + rightShoulder.y) / 2;
+        let avgKneeY = (leftKnee.y + rightKnee.y) / 2;
+        let verticalDist = avgKneeY - avgShoulderY;
+        
+        // 2. Calculate shoulder width as a reference for "scale"
+        let shoulderWidth = dist(leftShoulder.x, leftShoulder.y, rightShoulder.x, rightShoulder.y);
+
+        // If the user is standing sideways (batting stance), shoulder width appears small.
+        // So we just check if vertical distance is significant enough to imply standing.
+        
+        // Simple "Squat" check: 
+        // We can check the angle, but for now, let's use a simpler heuristic relative to the frame height
+        // or just ensure the user is detected.
+        
+        // Heuristic: If vertical distance is small relative to video height, maybe crouching?
+        // Actually, let's stick to the pixel check but MAKE IT RELATIVE to the skeleton size.
+        // A better check: Is the hip significantly lower than the shoulder? (Always yes).
+        
+        // Let's try: Is the distance between Shoulder and Knee 'compressed'? 
+        // This is hard with 2D points without depth. 
+        
+        // Alternative: Check alignment. 
+        // For a stance, feet should be apart. 
+        let feetWidth = dist(pose.leftAnkle.x, pose.leftAnkle.y, pose.rightAnkle.x, pose.rightAnkle.y);
+        
+        if (feetWidth > shoulderWidth * 1.2) {
+             stanceMsg.innerHTML = "<span class='status-good'>Good Base</span>";
+             tipMsg.innerText = "Feet are wide. Ready to move.";
+        } else {
+             stanceMsg.innerHTML = "<span class='status-warn'>Widen Stance</span>";
+             tipMsg.innerText = "Spread your feet for better balance.";
+        }
+    }
+
+    function analyzeBowling(pose) {
+        const rightWrist = pose.rightWrist;
+        const leftWrist = pose.leftWrist;
+        const nose = pose.nose;
+
+        let stanceMsg = document.getElementById('stance-feedback');
+        let tipMsg = document.getElementById('tech-tip');
+
+        // Check BOTH arms to support left/right handed bowlers automatically
+        // We look for whichever wrist is highest
+        let highestWrist = (rightWrist.y < leftWrist.y) ? rightWrist : leftWrist;
+        
+        // Remember: Y=0 is top. So smaller Y is higher up.
+        if (highestWrist.y < nose.y) {
+            stanceMsg.innerHTML = "<span class='status-good'>High Arm Action</span>";
+            tipMsg.innerText = "Excellent release point detected.";
+        } else {
+            stanceMsg.innerHTML = "<span class='status-warn'>Arm too Low</span>";
+            tipMsg.innerText = "Reach high at the point of delivery.";
+        }
+    }
+
+    function drawKeypoints()  {
+        for (let i = 0; i < poses.length; i++) {
+            let pose = poses[i].pose;
+            for (let j = 0; j < pose.keypoints.length; j++) {
+                let keypoint = pose.keypoints[j];
+                if (keypoint.score > 0.2) {
+                    fill(244, 208, 63); 
+                    noStroke();
+                    ellipse(keypoint.position.x, keypoint.position.y, 10, 10);
+                }
+            }
+        }
+    }
+
+    function drawSkeleton() {
+        for (let i = 0; i < poses.length; i++) {
+            let skeleton = poses[i].skeleton;
+            for (let j = 0; j < skeleton.length; j++) {
+                let partA = skeleton[j][0];
+                let partB = skeleton[j][1];
+                stroke(255);
+                strokeWeight(2);
+                line(partA.position.x, partA.position.y, partB.position.x, partB.position.y);
+            }
+        }
+    }
