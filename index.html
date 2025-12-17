@@ -2,166 +2,118 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CricCoach Pro | Real-time Biomechanics</title>
-    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CricCoach Mobile</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
     <script src="https://unpkg.com/ml5@latest/dist/ml5.min.js"></script>
 
     <style>
-        /* --- HIGH-TECH UI STYLING --- */
         @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
-
-        :root {
-            --neon-green: #0f0;
-            --neon-red: #ff3333;
-            --neon-blue: #00f3ff;
-            --bg-color: #050505;
-            --glass: rgba(255, 255, 255, 0.05);
-        }
 
         body {
             margin: 0;
-            background-color: var(--bg-color);
-            color: var(--neon-blue);
-            font-family: 'Share Tech Mono', monospace; /* Matrix style font */
+            background-color: #000;
+            color: #00f3ff;
+            font-family: 'Share Tech Mono', monospace;
+            overflow: hidden; /* Prevent scrolling */
             display: flex;
             flex-direction: column;
             align-items: center;
-            height: 100vh;
-            overflow: hidden;
         }
 
-        /* The Main Viewfinder */
+        /* Responsive Camera Container */
         #interface-container {
             position: relative;
-            margin-top: 20px;
-            border: 2px solid var(--neon-blue);
-            width: 640px;
-            height: 480px;
-            box-shadow: 0 0 20px rgba(0, 243, 255, 0.2);
-            background: #000;
+            width: 100vw; /* Full width of phone */
+            height: 75vh; /* 75% of screen height */
+            background: #111;
+            overflow: hidden;
+            border-bottom: 2px solid #00f3ff;
         }
 
-        /* The Camera Canvas sits here */
-        canvas { display: block; }
+        /* Force canvas to fit container */
+        canvas {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover;
+        }
 
-        /* HUD Overlays (The cool tech bits) */
+        /* HUD Overlay */
         .hud-overlay {
             position: absolute;
             top: 0; left: 0; width: 100%; height: 100%;
-            pointer-events: none; /* Let clicks pass through */
+            pointer-events: none;
             box-sizing: border-box;
             border: 1px solid rgba(0, 243, 255, 0.3);
         }
 
-        /* Corner Brackets */
-        .corner {
-            position: absolute;
-            width: 20px; height: 20px;
-            border: 3px solid var(--neon-blue);
-            transition: all 0.3s;
-        }
-        .tl { top: 10px; left: 10px; border-right: none; border-bottom: none; }
-        .tr { top: 10px; right: 10px; border-left: none; border-bottom: none; }
-        .bl { bottom: 10px; left: 10px; border-right: none; border-top: none; }
-        .br { bottom: 10px; right: 10px; border-left: none; border-top: none; }
-
-        /* Scanning Line Animation */
-        .scan-line {
-            position: absolute;
-            width: 100%; height: 2px;
-            background: rgba(0, 243, 255, 0.5);
-            animation: scan 3s linear infinite;
-            top: 0;
-        }
-        @keyframes scan {
-            0% { top: 0%; opacity: 0; }
-            50% { opacity: 1; }
-            100% { top: 100%; opacity: 0; }
+        .status-bar {
+            position: absolute; top: 10px; width: 100%;
+            text-align: center; font-size: 1.2rem;
+            text-shadow: 0 0 5px #00f3ff;
+            background: rgba(0,0,0,0.5);
+            padding: 5px 0;
         }
 
-        /* Status Panels */
-        .panel {
+        /* Large Central Feedback Text */
+        #main-feedback {
             position: absolute;
-            background: rgba(0, 0, 0, 0.8);
-            border: 1px solid var(--neon-blue);
+            bottom: 20%;
+            width: 100%;
+            text-align: center;
+            font-size: 2rem;
+            font-weight: bold;
+            text-shadow: 2px 2px 0 #000;
+        }
+
+        /* Controls Area (Bottom of Phone) */
+        .controls {
+            height: 25vh;
+            width: 100%;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            background: #050505;
             padding: 10px;
         }
 
-        .top-panel { top: 20px; left: 50%; transform: translateX(-50%); text-align: center; }
-        .data-panel { top: 50px; left: 20px; width: 150px; }
-        .alert-panel { bottom: 30px; left: 50%; transform: translateX(-50%); font-size: 1.5rem; color: var(--neon-green); text-shadow: 0 0 10px var(--neon-green); }
-
-        /* Controls */
-        .controls {
-            margin-top: 20px;
-            display: flex;
-            gap: 20px;
-        }
         button {
+            width: 45%;
+            height: 60px;
             background: transparent;
-            border: 1px solid var(--neon-blue);
-            color: var(--neon-blue);
-            padding: 10px 30px;
+            border: 2px solid #00f3ff;
+            color: #00f3ff;
             font-family: 'Share Tech Mono', monospace;
             font-size: 1.2rem;
-            cursor: pointer;
-            text-transform: uppercase;
-            transition: 0.2s;
+            border-radius: 10px;
         }
-        button:hover { background: var(--neon-blue); color: #000; box-shadow: 0 0 15px var(--neon-blue); }
-        button.active { background: var(--neon-green); color: #000; border-color: var(--neon-green); box-shadow: 0 0 15px var(--neon-green); }
+        button.active { background: #00f3ff; color: #000; box-shadow: 0 0 15px #00f3ff; }
 
-        /* Loading Screen */
+        /* Loader */
         #loader {
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            color: var(--neon-blue); font-size: 1.5rem; background: #000; padding: 20px; border: 1px solid var(--neon-blue);
-            z-index: 100;
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.8);
+            padding: 20px; border: 1px solid #00f3ff;
+            z-index: 99;
         }
-
     </style>
 </head>
 <body>
 
-    <div style="width:100%; text-align:center; margin-top:10px;">
-        <h1 style="margin:0; text-shadow: 0 0 10px var(--neon-blue);">CRIC-COACH <span style="font-size:0.5em; vertical-align:middle;">PRO v2.0</span></h1>
-    </div>
-
     <div id="interface-container">
-        
+        <div id="loader">LOADING AI...</div>
         <div id="canvas-wrapper"></div>
         
-        <div id="loader">INITIALIZING NEURAL NET...</div>
-
         <div class="hud-overlay">
-            <div class="corner tl"></div>
-            <div class="corner tr"></div>
-            <div class="corner bl"></div>
-            <div class="corner br"></div>
-            <div class="scan-line"></div>
-
-            <div class="panel top-panel">
-                <div style="font-size:0.8rem; color:#888;">SYSTEM STATUS</div>
-                <div id="status-text">CAMERA ACTIVE</div>
-            </div>
-
-            <div class="panel data-panel">
-                <div style="margin-bottom:10px; border-bottom:1px solid #555;">METRICS</div>
-                <div id="metric-1">Stance: --</div>
-                <div id="metric-2">Arm: --</div>
-                <div style="margin-top:10px; font-size:0.8rem; color:#888;">FPS: <span id="fps-counter">0</span></div>
-            </div>
-
-            <div class="panel alert-panel" id="main-feedback">
-                STAND IN FRAME
-            </div>
+            <div class="status-bar" id="status-text">INITIALIZING...</div>
+            <div id="main-feedback"></div>
         </div>
     </div>
 
     <div class="controls">
-        <button id="btn-bat" class="active" onclick="switchMode('batting')">🏏 BATTING</button>
-        <button id="btn-bowl" onclick="switchMode('bowling')">⚾ BOWLING</button>
+        <button id="btn-bat" class="active" onclick="setMode('batting')">BAT</button>
+        <button id="btn-bowl" onclick="setMode('bowling')">BOWL</button>
     </div>
 
     <script>
@@ -169,184 +121,125 @@
         let poseNet;
         let poses = [];
         let mode = 'batting';
-        let skeletonColor;
-        let isModelReady = false;
+        let feedbackEl = document.getElementById('main-feedback');
 
         function setup() {
-            // Create canvas inside the specific container
-            let canvas = createCanvas(640, 480);
+            // Make canvas fill the container
+            let container = document.getElementById('interface-container');
+            let w = container.offsetWidth;
+            let h = container.offsetHeight;
+            let canvas = createCanvas(w, h);
             canvas.parent('canvas-wrapper');
-            
-            skeletonColor = color(0, 243, 255); // Default Neon Blue
 
-            // 1. Start Camera Instantly
-            video = createCapture(VIDEO);
-            video.size(width, height);
+            // --- MOBILE CAMERA SETUP ---
+            // We specifically ask for the "user" (front) camera
+            // and audio: false to avoid permission errors
+            let constraints = {
+                video: {
+                    facingMode: "user"
+                },
+                audio: false
+            };
+            
+            video = createCapture(constraints, function(stream) {
+                // IMPORTANT FOR IPHONE:
+                // Prevents the video from going full screen automatically
+                video.elt.setAttribute('playsinline', '');
+            });
+            
+            video.size(w, h);
             video.hide();
 
-            // 2. Load the LIGHTEST PoseNet model (Multiplier 0.50 is the key for speed)
+            // Load Fast AI
             let options = {
                 architecture: 'MobileNetV1',
                 imageScaleFactor: 0.3,
                 outputStride: 16,
-                flipHorizontal: false,
+                flipHorizontal: true, // Mirror mode for selfie camera
                 minConfidence: 0.5,
-                maxPoseDetections: 1,
-                scoreThreshold: 0.5,
-                nmsRadius: 20,
                 detectionType: 'single',
-                multiplier: 0.50  // <--- THIS MAKES IT FAST
+                multiplier: 0.50 
             };
 
-            poseNet = ml5.poseNet(video, options, modelLoaded);
-            
-            poseNet.on('pose', function(results) {
-                poses = results;
-            });
+            poseNet = ml5.poseNet(video, options, modelReady);
+            poseNet.on('pose', function(results) { poses = results; });
         }
 
-        function modelLoaded() {
-            isModelReady = true;
+        function modelReady() {
             document.getElementById('loader').style.display = 'none';
-            document.getElementById('status-text').innerText = "AI ONLINE";
-            document.getElementById('status-text').style.color = "#0f0";
+            document.getElementById('status-text').innerText = "CAMERA ACTIVE";
         }
 
         function draw() {
-            // Draw Video
+            // Draw video to fill screen
             image(video, 0, 0, width, height);
-
-            // Darken the video slightly to make the HUD pop
-            fill(0, 50);
+            
+            // Darken slightly for UI pop
+            fill(0, 40);
             rect(0,0,width,height);
 
-            if (isModelReady) {
-                drawSciFiSkeleton();
-                analyzeBiomechanics();
-                document.getElementById('fps-counter').innerText = Math.floor(frameRate());
-            }
+            drawSkeleton();
+            analyze();
         }
 
-        // --- THE BRAIN (LOGIC) ---
-        function analyzeBiomechanics() {
+        function analyze() {
             if (poses.length > 0) {
                 let p = poses[0].pose;
-                let feedback = document.getElementById('main-feedback');
-
-                // Confidence Check
-                if (p.score < 0.2) {
-                    feedback.innerText = "PLAYER NOT DETECTED";
-                    feedback.style.color = "#888";
-                    skeletonColor = color(100, 100, 100);
-                    return;
-                }
+                if (p.score < 0.2) return;
 
                 if (mode === 'batting') {
-                    // Batting Logic: Stance Check
+                    // Simple Stance Check
                     let kneeY = (p.leftKnee.y + p.rightKnee.y) / 2;
-                    let shoulderY = (p.leftShoulder.y + p.rightShoulder.y) / 2;
-                    let diff = kneeY - shoulderY;
-                    
-                    document.getElementById('metric-1').innerText = "H-Diff: " + Math.floor(diff);
+                    let hipY = (p.leftHip.y + p.rightHip.y) / 2;
+                    let diff = kneeY - hipY;
 
-                    // Logic: If difference is small, you are standing straight. Large = bent knees.
-                    // Threshold ~230 (Depends on distance, but good baseline)
-                    if (diff > 240) {
-                        feedback.innerText = "PERFECT STANCE";
-                        feedback.style.color = "#0f0"; // Green
-                        skeletonColor = color(0, 255, 0);
-                        updateCorners("#0f0");
+                    // On mobile, pixels are smaller, so we adjust threshold
+                    if (diff > 100) { 
+                        feedbackEl.innerText = "GOOD STANCE";
+                        feedbackEl.style.color = "#0f0";
                     } else {
-                        feedback.innerText = "BEND YOUR KNEES";
-                        feedback.style.color = "#ff3333"; // Red
-                        skeletonColor = color(255, 51, 51);
-                        updateCorners("#ff3333");
+                        feedbackEl.innerText = "BEND KNEES";
+                        feedbackEl.style.color = "red";
                     }
-
                 } else {
-                    // Bowling Logic: Arm Height
-                    let wrist = p.rightWrist;
-                    let nose = p.nose;
-                    let score = wrist.score;
-
-                    if (score > 0.5) {
-                        if (wrist.y < nose.y) {
-                            feedback.innerText = "HIGH ARM ACTION";
-                            feedback.style.color = "#0f0";
-                            skeletonColor = color(0, 255, 0);
-                            updateCorners("#0f0");
-                        } else {
-                            feedback.innerText = "LIFT ARM HIGHER";
-                            feedback.style.color = "#ff3333";
-                            skeletonColor = color(255, 51, 51);
-                            updateCorners("#ff3333");
-                        }
+                    // Bowling Logic
+                    if (p.rightWrist.y < p.nose.y) {
+                        feedbackEl.innerText = "HIGH ARM!";
+                        feedbackEl.style.color = "#0f0";
                     } else {
-                        feedback.innerText = "TRACKING ARM...";
-                        feedback.style.color = "#00f3ff";
+                        feedbackEl.innerText = "LIFT ARM";
+                        feedbackEl.style.color = "red";
                     }
                 }
             }
         }
 
-        // --- THE LOOK (VISUALS) ---
-        function drawSciFiSkeleton() {
-            if(poses.length === 0) return;
-            let p = poses[0].pose;
-            let k = p.keypoints;
-
-            // Draw Lines
-            stroke(skeletonColor);
-            strokeWeight(2);
-            // Arms
-            connect(p.leftShoulder, p.leftElbow);
-            connect(p.leftElbow, p.leftWrist);
-            connect(p.rightShoulder, p.rightElbow);
-            connect(p.rightElbow, p.rightWrist);
-            // Torso
-            connect(p.leftShoulder, p.rightShoulder);
-            connect(p.leftShoulder, p.leftHip);
-            connect(p.rightShoulder, p.rightHip);
-            connect(p.leftHip, p.rightHip);
-            // Legs
-            connect(p.leftHip, p.leftKnee);
-            connect(p.leftKnee, p.leftAnkle);
-            connect(p.rightHip, p.rightKnee);
-            connect(p.rightKnee, p.rightAnkle);
-
-            // Draw Tech Nodes (Dots)
-            noStroke();
-            fill(255);
-            for(let i=0; i<k.length; i++) {
-                if(k[i].score > 0.2) {
-                    ellipse(k[i].position.x, k[i].position.y, 8, 8);
-                    // Add a glow effect
-                    drawingContext.shadowBlur = 10;
-                    drawingContext.shadowColor = skeletonColor;
+        function drawSkeleton() {
+            if (poses.length > 0) {
+                let p = poses[0].pose;
+                stroke(0, 243, 255);
+                strokeWeight(3);
+                
+                // Draw simple stick figure
+                let points = [p.leftShoulder, p.rightShoulder, p.leftHip, p.rightHip, p.leftKnee, p.rightKnee];
+                for (let pt of points) {
+                    if(pt.score > 0.5) ellipse(pt.x, pt.y, 10, 10);
                 }
             }
-            // Reset Glow
-            drawingContext.shadowBlur = 0;
+        }
+        
+        // Handle resizing (rotating phone)
+        function windowResized() {
+            let container = document.getElementById('interface-container');
+            resizeCanvas(container.offsetWidth, container.offsetHeight);
+            video.size(container.offsetWidth, container.offsetHeight);
         }
 
-        function connect(p1, p2) {
-            if(p1.score > 0.2 && p2.score > 0.2) {
-                line(p1.x, p1.y, p2.x, p2.y);
-            }
-        }
-
-        function updateCorners(col) {
-            let corners = document.querySelectorAll('.corner');
-            corners.forEach(c => c.style.borderColor = col);
-        }
-
-        function switchMode(m) {
+        function setMode(m) {
             mode = m;
             document.getElementById('btn-bat').className = (m==='batting'?'active':'');
             document.getElementById('btn-bowl').className = (m==='bowling'?'active':'');
-            document.getElementById('main-feedback').innerText = "SWITCHING...";
         }
-
     </script>
 </body>
 </html>
