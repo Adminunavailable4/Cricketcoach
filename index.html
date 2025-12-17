@@ -3,243 +3,281 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>CricCoach</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
+    <title>CricCoach Lite</title>
+    
     <script src="https://unpkg.com/ml5@latest/dist/ml5.min.js"></script>
 
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
-
         body {
             margin: 0;
-            background-color: #000;
-            color: #00f3ff;
-            font-family: 'Share Tech Mono', monospace;
-            overflow: hidden; /* Prevent scrolling */
+            background: #000;
+            font-family: sans-serif;
+            overflow: hidden;
             display: flex;
             flex-direction: column;
             align-items: center;
         }
 
-        /* Responsive Camera Container */
-        #interface-container {
+        /* The Container for Video & Canvas */
+        #cam-container {
             position: relative;
-            width: 100vw; /* Full width of phone */
-            height: 75vh; /* 75% of screen height */
-            background: #111;
-            overflow: hidden;
-            border-bottom: 2px solid #00f3ff;
+            width: 100vw;
+            height: 70vh;
+            background: #222;
         }
 
-        /* Force canvas to fit container */
+        /* The raw video element (hidden but active) */
+        video {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            object-fit: cover;
+            z-index: 1;
+        }
+
+        /* The drawing layer (Skeleton) */
         canvas {
-            width: 100% !important;
-            height: 100% !important;
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 2;
             object-fit: cover;
         }
 
-        /* HUD Overlay */
-        .hud-overlay {
+        /* Loading Bar */
+        #loader-overlay {
             position: absolute;
-            top: 0; left: 0; width: 100%; height: 100%;
-            pointer-events: none;
-            box-sizing: border-box;
-            border: 1px solid rgba(0, 243, 255, 0.3);
-        }
-
-        .status-bar {
-            position: absolute; top: 10px; width: 100%;
-            text-align: center; font-size: 1.2rem;
-            text-shadow: 0 0 5px #00f3ff;
-            background: rgba(0,0,0,0.5);
-            padding: 5px 0;
-        }
-
-        /* Large Central Feedback Text */
-        #main-feedback {
-            position: absolute;
-            bottom: 20%;
-            width: 100%;
+            bottom: 0; left: 0; width: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 10;
+            padding: 20px;
             text-align: center;
-            font-size: 2rem;
-            font-weight: bold;
-            text-shadow: 2px 2px 0 #000;
+            color: #00f3ff;
+            transition: opacity 0.5s;
         }
 
-        /* Controls Area (Bottom of Phone) */
-        .controls {
-            height: 25vh;
-            width: 100%;
-            display: flex;
-            justify-content: space-around;
-            align-items: center;
-            background: #050505;
-            padding: 10px;
+        .progress-bar {
+            width: 80%;
+            height: 4px;
+            background: #333;
+            margin: 10px auto;
+            border-radius: 2px;
+            overflow: hidden;
         }
+        .progress-fill {
+            width: 0%; /* Starts empty */
+            height: 100%;
+            background: #00f3ff;
+            animation: loadAnim 2s infinite;
+        }
+
+        @keyframes loadAnim {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+
+        /* Controls */
+        #controls {
+            height: 30vh;
+            width: 100%;
+            background: #111;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            z-index: 5;
+        }
+
+        #feedback-text {
+            color: #fff;
+            font-size: 1.5rem;
+            font-weight: bold;
+            text-align: center;
+        }
+
+        .btn-group { display: flex; gap: 20px; }
 
         button {
-            width: 45%;
-            height: 60px;
+            padding: 12px 30px;
             background: transparent;
-            border: 2px solid #00f3ff;
+            border: 1px solid #00f3ff;
             color: #00f3ff;
-            font-family: 'Share Tech Mono', monospace;
-            font-size: 1.2rem;
-            border-radius: 10px;
+            font-size: 1rem;
+            border-radius: 20px;
         }
-        button.active { background: #00f3ff; color: #000; box-shadow: 0 0 15px #00f3ff; }
+        button.active { background: #00f3ff; color: #000; font-weight: bold; }
 
-        /* Loader */
-        #loader {
-            position: absolute; top: 50%; left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(0,0,0,0.8);
-            padding: 20px; border: 1px solid #00f3ff;
-            z-index: 99;
-        }
     </style>
 </head>
 <body>
 
-    <div id="interface-container">
-        <div id="loader">LOADING AI...</div>
-        <div id="canvas-wrapper"></div>
+    <div id="cam-container">
+        <video id="video" playsinline autoplay muted></video>
+        <canvas id="canvas"></canvas>
         
-        <div class="hud-overlay">
-            <div class="status-bar" id="status-text">INITIALIZING...</div>
-            <div id="main-feedback"></div>
+        <div id="loader-overlay">
+            <div id="status-msg">Starting Camera...</div>
+            <div class="progress-bar"><div class="progress-fill"></div></div>
         </div>
     </div>
 
-    <div class="controls">
-        <button id="btn-bat" class="active" onclick="setMode('batting')">BAT</button>
-        <button id="btn-bowl" onclick="setMode('bowling')">BOWL</button>
+    <div id="controls">
+        <div id="feedback-text">WAITING FOR AI...</div>
+        <div class="btn-group">
+            <button id="btn-bat" class="active" onclick="setMode('batting')">BAT</button>
+            <button id="btn-bowl" onclick="setMode('bowling')">BOWL</button>
+        </div>
     </div>
 
     <script>
-        let video;
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const statusMsg = document.getElementById('status-msg');
+        const feedback = document.getElementById('feedback-text');
+        
         let poseNet;
-        let poses = [];
-        let mode = 'batting';
-        let feedbackEl = document.getElementById('main-feedback');
+        let currentMode = 'batting';
+        let isAIReady = false;
 
-        function setup() {
-            // Make canvas fill the container
-            let container = document.getElementById('interface-container');
-            let w = container.offsetWidth;
-            let h = container.offsetHeight;
-            let canvas = createCanvas(w, h);
-            canvas.parent('canvas-wrapper');
+        // 1. START CAMERA IMMEDIATELY (No waiting)
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user', width: 640, height: 480 },
+                    audio: false
+                });
+                video.srcObject = stream;
+                statusMsg.innerText = "Camera Active! Downloading AI...";
+                
+                // Once video plays, set canvas size match
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    loadAI(); // Start downloading AI only after camera works
+                };
+            } catch (err) {
+                statusMsg.innerText = "Error: Allow Camera Permission!";
+                statusMsg.style.color = "red";
+            }
+        }
 
-            // --- MOBILE CAMERA SETUP ---
-            // We specifically ask for the "user" (front) camera
-            // and audio: false to avoid permission errors
-            let constraints = {
-                video: {
-                    facingMode: "user"
-                },
-                audio: false
-            };
-            
-            video = createCapture(constraints, function(stream) {
-                // IMPORTANT FOR IPHONE:
-                // Prevents the video from going full screen automatically
-                video.elt.setAttribute('playsinline', '');
-            });
-            
-            video.size(w, h);
-            video.hide();
-
-            // Load Fast AI
-            let options = {
+        // 2. LOAD AI IN BACKGROUND
+        function loadAI() {
+            // Options optimized for speed
+            const options = {
                 architecture: 'MobileNetV1',
                 imageScaleFactor: 0.3,
                 outputStride: 16,
-                flipHorizontal: true, // Mirror mode for selfie camera
+                flipHorizontal: true,
                 minConfidence: 0.5,
-                detectionType: 'single',
-                multiplier: 0.50 
+                multiplier: 0.50 // Smallest model size
             };
 
-            poseNet = ml5.poseNet(video, options, modelReady);
-            poseNet.on('pose', function(results) { poses = results; });
+            poseNet = ml5.poseNet(video, options, () => {
+                isAIReady = true;
+                // Hide Loader
+                document.getElementById('loader-overlay').style.opacity = '0';
+                setTimeout(() => document.getElementById('loader-overlay').style.display = 'none', 500);
+                feedback.innerText = "READY!";
+                loop(); // Start the loop
+            });
+
+            poseNet.on('pose', (results) => {
+                if(results.length > 0) analyze(results[0].pose);
+            });
         }
 
-        function modelReady() {
-            document.getElementById('loader').style.display = 'none';
-            document.getElementById('status-text').innerText = "CAMERA ACTIVE";
-        }
-
-        function draw() {
-            // Draw video to fill screen
-            image(video, 0, 0, width, height);
+        // 3. THE LOOP (Draws lines and checks logic)
+        function loop() {
+            if(!isAIReady) return;
             
-            // Darken slightly for UI pop
-            fill(0, 40);
-            rect(0,0,width,height);
-
-            drawSkeleton();
-            analyze();
+            // Clear previous lines
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // We rely on the 'pose' event for data, 
+            // but we need a loop to keep the UI responsive if needed.
+            requestAnimationFrame(loop);
         }
 
-        function analyze() {
-            if (poses.length > 0) {
-                let p = poses[0].pose;
-                if (p.score < 0.2) return;
+        function analyze(pose) {
+            // Draw Skeleton
+            drawSkeleton(pose);
 
-                if (mode === 'batting') {
-                    // Simple Stance Check
-                    let kneeY = (p.leftKnee.y + p.rightKnee.y) / 2;
-                    let hipY = (p.leftHip.y + p.rightHip.y) / 2;
-                    let diff = kneeY - hipY;
+            // Run Logic
+            if (currentMode === 'batting') {
+                // Stance Logic
+                let kneeY = (pose.leftKnee.y + pose.rightKnee.y) / 2;
+                let hipY = (pose.leftHip.y + pose.rightHip.y) / 2;
+                let diff = kneeY - hipY;
 
-                    // On mobile, pixels are smaller, so we adjust threshold
-                    if (diff > 100) { 
-                        feedbackEl.innerText = "GOOD STANCE";
-                        feedbackEl.style.color = "#0f0";
-                    } else {
-                        feedbackEl.innerText = "BEND KNEES";
-                        feedbackEl.style.color = "red";
-                    }
+                if (diff > 80) { // Threshold for bent knees
+                    feedback.innerText = "✅ GOOD STANCE";
+                    feedback.style.color = "#00ff00";
                 } else {
-                    // Bowling Logic
-                    if (p.rightWrist.y < p.nose.y) {
-                        feedbackEl.innerText = "HIGH ARM!";
-                        feedbackEl.style.color = "#0f0";
-                    } else {
-                        feedbackEl.innerText = "LIFT ARM";
-                        feedbackEl.style.color = "red";
-                    }
+                    feedback.innerText = "⚠️ BEND KNEES";
+                    feedback.style.color = "yellow";
+                }
+            } else {
+                // Bowling Logic
+                if (pose.rightWrist.y < pose.nose.y) {
+                    feedback.innerText = "✅ HIGH ARM";
+                    feedback.style.color = "#00ff00";
+                } else {
+                    feedback.innerText = "⚠️ LIFT ARM";
+                    feedback.style.color = "yellow";
                 }
             }
         }
 
-        function drawSkeleton() {
-            if (poses.length > 0) {
-                let p = poses[0].pose;
-                stroke(0, 243, 255);
-                strokeWeight(3);
-                
-                // Draw simple stick figure
-                let points = [p.leftShoulder, p.rightShoulder, p.leftHip, p.rightHip, p.leftKnee, p.rightKnee];
-                for (let pt of points) {
-                    if(pt.score > 0.5) ellipse(pt.x, pt.y, 10, 10);
+        function drawSkeleton(pose) {
+            ctx.strokeStyle = "#00f3ff";
+            ctx.lineWidth = 3;
+            ctx.fillStyle = "#fff";
+
+            // Helper to draw line
+            const connect = (p1, p2) => {
+                if(p1.score > 0.5 && p2.score > 0.5) {
+                    ctx.beginPath();
+                    ctx.moveTo(p1.x, p1.y);
+                    ctx.lineTo(p2.x, p2.y);
+                    ctx.stroke();
                 }
-            }
-        }
-        
-        // Handle resizing (rotating phone)
-        function windowResized() {
-            let container = document.getElementById('interface-container');
-            resizeCanvas(container.offsetWidth, container.offsetHeight);
-            video.size(container.offsetWidth, container.offsetHeight);
+            };
+
+            // Draw Body
+            connect(pose.leftShoulder, pose.rightShoulder);
+            connect(pose.leftShoulder, pose.leftHip);
+            connect(pose.rightShoulder, pose.rightHip);
+            connect(pose.leftHip, pose.rightHip); // Hip line
+            
+            // Arms
+            connect(pose.leftShoulder, pose.leftElbow);
+            connect(pose.leftElbow, pose.leftWrist);
+            connect(pose.rightShoulder, pose.rightElbow);
+            connect(pose.rightElbow, pose.rightWrist);
+
+            // Draw dots
+            pose.keypoints.forEach(p => {
+                if(p.score > 0.5) {
+                    ctx.beginPath();
+                    ctx.arc(p.position.x, p.position.y, 5, 0, 2 * Math.PI);
+                    ctx.fill();
+                }
+            });
         }
 
-        function setMode(m) {
-            mode = m;
-            document.getElementById('btn-bat').className = (m==='batting'?'active':'');
-            document.getElementById('btn-bowl').className = (m==='bowling'?'active':'');
+        function setMode(mode) {
+            currentMode = mode;
+            document.getElementById('btn-bat').className = mode === 'batting' ? 'active' : '';
+            document.getElementById('btn-bowl').className = mode === 'bowling' ? 'active' : '';
         }
+
+        // Start everything
+        startCamera();
+
     </script>
 </body>
 </html>
+
