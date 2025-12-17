@@ -2,266 +2,241 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <title>CricCoach AI - Instant Version</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CricCoach AI (Fast Version)</title>
-    
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
+    <script src="https://unpkg.com/ml5@latest/dist/ml5.min.js"></script>
 
     <style>
-        :root {
-            --primary: #1a472a; /* Cricket Green */
-            --accent: #f4d03f; /* Gold */
-            --dark: #121212;
-            --light: #f5f5f5;
-        }
-
         body {
-            font-family: 'Segoe UI', sans-serif;
-            background-color: var(--dark);
-            color: var(--light);
+            background-color: #121212;
+            color: white;
+            font-family: sans-serif;
             display: flex;
             flex-direction: column;
             align-items: center;
-            min-height: 100vh;
             margin: 0;
         }
 
-        header {
+        /* The Status Log - Shows you exactly what is happening */
+        #status-log {
             width: 100%;
-            background-color: var(--primary);
-            padding: 15px;
+            background: #333;
+            color: #00ff00; /* Hacker Green */
+            padding: 10px;
             text-align: center;
-            border-bottom: 3px solid var(--accent);
+            font-family: monospace;
+            font-size: 14px;
+            border-bottom: 2px solid #555;
         }
 
-        h1 { margin: 0; font-size: 2rem; }
-        .tagline { color: var(--accent); font-style: italic; font-size: 0.9rem; }
+        h1 { margin: 10px 0; color: #f4d03f; }
 
-        .controls { margin: 15px; display: flex; gap: 15px; }
-
-        button {
-            padding: 10px 20px;
-            font-size: 1rem;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: bold;
-        }
-
-        .btn-bat { background: #fff; color: var(--primary); }
-        .btn-bowl { background: var(--accent); color: var(--dark); }
-        .btn-active { transform: scale(1.05); outline: 3px solid #fff; }
-
-        #canvas-wrapper {
+        .game-container {
             position: relative;
+            margin-top: 10px;
+            border: 4px solid #f4d03f;
             width: 640px;
             height: 480px;
-            background: #000;
-            border: 2px solid var(--accent);
-            border-radius: 8px;
-            overflow: hidden;
         }
 
-        .hud-panel {
-            margin-top: 15px;
-            width: 90%;
-            max-width: 640px;
-            background: #1e1e1e;
+        /* Feedback Text Overlay */
+        .feedback-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background: rgba(0, 0, 0, 0.7);
             padding: 15px;
-            border-radius: 8px;
-            border-left: 4px solid var(--primary);
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
+            box-sizing: border-box;
+            text-align: center;
         }
 
-        .hud-item label { color: #888; font-size: 0.8rem; display: block; }
-        .hud-item span { font-size: 1.1rem; font-weight: bold; }
-        .status-good { color: #2ecc71; }
-        .status-bad { color: #e74c3c; }
+        #main-feedback { font-size: 24px; font-weight: bold; display: block; }
+        #sub-feedback { font-size: 16px; color: #ccc; margin-top: 5px; display: block; }
 
-        #loading { 
-            position: absolute; top: 50%; left: 50%; 
-            transform: translate(-50%, -50%);
-            background: rgba(0,0,0,0.8);
-            padding: 20px;
-            border-radius: 10px;
-            color: var(--accent);
-            z-index: 100;
+        .good { color: #2ecc71; }
+        .bad { color: #e74c3c; }
+        .waiting { color: #f1c40f; }
+
+        .buttons { margin-top: 15px; }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background: #333;
+            color: white;
+            border: 1px solid #fff;
+            margin: 0 5px;
         }
+        button.active { background: #f4d03f; color: black; border: none; }
+
     </style>
 </head>
 <body>
 
-    <header>
-        <h1>CricCoach AI ⚡</h1>
-        <p class="tagline">Powered by MoveNet Lightning</p>
-    </header>
+    <div id="status-log">Step 1: Waiting for Camera Permission...</div>
 
-    <div class="controls">
-        <button id="batBtn" class="btn-bat btn-active" onclick="setMode('batting')">🏏 Batting</button>
-        <button id="bowlBtn" class="btn-bowl" onclick="setMode('bowling')">⚾ Bowling</button>
+    <h1>CricCoach AI</h1>
+
+    <div class="game-container" id="canvas-holder">
+        <div class="feedback-overlay">
+            <span id="main-feedback" class="waiting">Initializing...</span>
+            <span id="sub-feedback">Please allow camera access.</span>
+        </div>
     </div>
 
-    <div id="canvas-wrapper">
-        <div id="loading">Loading Fast Model...</div>
-        <div id="canvas-container"></div>
-    </div>
-
-    <div class="hud-panel">
-        <div class="hud-item">
-            <label>Current Mode</label>
-            <span id="mode-display" style="color:var(--accent)">Batting Analysis</span>
-        </div>
-        <div class="hud-item">
-            <label>Feedback</label>
-            <span id="feedback-display">Waiting for player...</span>
-        </div>
-        <div class="hud-item" style="grid-column: span 2">
-            <label>Technical Tip</label>
-            <span id="tip-display">Stand in full view of camera.</span>
-        </div>
+    <div class="buttons">
+        <button id="btn-bat" class="active" onclick="setMode('batting')">Batting Coach</button>
+        <button id="btn-bowl" onclick="setMode('bowling')">Bowling Coach</button>
     </div>
 
     <script>
-        let detector;
         let video;
+        let poseNet;
         let poses = [];
-        let currentMode = 'batting';
-        let isModelLoaded = false;
+        let mode = 'batting';
+        let modelLoaded = false;
+        
+        // Log helper
+        function log(msg) {
+            document.getElementById('status-log').innerText = msg;
+            console.log(msg);
+        }
 
-        async function setup() {
+        function setup() {
+            // 1. Create Canvas
             let canvas = createCanvas(640, 480);
-            canvas.parent('canvas-container');
+            canvas.parent('canvas-holder');
 
-            video = createCapture(VIDEO);
-            video.size(640, 480);
+            // 2. Start Video IMMEDIATELY
+            log("Step 2: Requesting Camera...");
+            video = createCapture(VIDEO, () => {
+                log("Step 3: Camera Active! Now downloading AI Brain (this may take 10-20s)...");
+            });
+            video.size(width, height);
             video.hide();
 
-            // Load MoveNet (Lightning version - extremely fast)
-            await loadMoveNet();
+            // 3. Load AI Model in background
+            poseNet = ml5.poseNet(video, {
+                architecture: 'MobileNetV1',
+                imageScaleFactor: 0.3,
+                outputStride: 16,
+                flipHorizontal: false,
+                minConfidence: 0.5,
+                maxPoseDetections: 1,
+                scoreThreshold: 0.5,
+                nmsRadius: 20,
+                detectionType: 'single',
+                multiplier: 0.75,
+            }, modelReady);
+
+            poseNet.on('pose', function(results) {
+                poses = results;
+            });
         }
 
-        async function loadMoveNet() {
-            const detectorConfig = {modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING};
-            detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, detectorConfig);
-            
-            isModelLoaded = true;
-            document.getElementById('loading').style.display = 'none';
-            detectPose();
-        }
-
-        async function detectPose() {
-            if (detector && video.elt.readyState === 4) {
-                poses = await detector.estimatePoses(video.elt);
-            }
-            requestAnimationFrame(detectPose);
+        function modelReady() {
+            modelLoaded = true;
+            log("✅ AI Ready! Coach is watching.");
+            document.getElementById('main-feedback').innerText = "Stand in position";
+            document.getElementById('sub-feedback').innerText = "Make sure your full body is visible";
         }
 
         function draw() {
+            // Draw the video frame
             image(video, 0, 0, width, height);
 
-            if (poses && poses.length > 0) {
-                drawSkeleton(poses[0].keypoints);
-                runCoachingLogic(poses[0].keypoints);
+            // If model isn't ready, show a loading spinner effect
+            if (!modelLoaded) {
+                fill(0, 200);
+                rect(0, 0, width, height);
+                fill(255);
+                textSize(20);
+                textAlign(CENTER);
+                text("Downloading AI Model...", width/2, height/2);
+                return;
+            }
+
+            drawKeypoints();
+            analyze();
+        }
+
+        function analyze() {
+            if (poses.length > 0) {
+                let pose = poses[0].pose;
+                
+                // Only analyze if we are confident (score > 0.2)
+                if (pose.score > 0.2) {
+                    if (mode === 'batting') doBattingLogic(pose);
+                    else doBowlingLogic(pose);
+                }
             }
         }
 
-        // --- COACHING LOGIC ---
-        function runCoachingLogic(keypoints) {
-            // Helper to get point by name
-            function getPoint(name) {
-                return keypoints.find(k => k.name === name);
-            }
+        function doBattingLogic(pose) {
+            let leftKnee = pose.leftKnee;
+            let leftShoulder = pose.leftShoulder;
+            
+            // Simple Stance Check
+            // Calculate vertical distance between shoulder and knee
+            let d = leftKnee.y - leftShoulder.y;
 
-            const nose = getPoint('nose');
-            const leftShoulder = getPoint('left_shoulder');
-            const rightShoulder = getPoint('right_shoulder');
-            const leftElbow = getPoint('left_elbow');
-            const rightWrist = getPoint('right_wrist');
-            const leftKnee = getPoint('left_knee');
-            const rightKnee = getPoint('right_knee');
+            let main = document.getElementById('main-feedback');
+            let sub = document.getElementById('sub-feedback');
 
-            // Ensure we have confidence in the points
-            if (leftShoulder.score < 0.3 || leftKnee.score < 0.3) return;
-
-            const feedbackEl = document.getElementById('feedback-display');
-            const tipEl = document.getElementById('tip-display');
-
-            if (currentMode === 'batting') {
-                // Batting Logic: Check Knee Bend (Stance)
-                let shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
-                let kneeY = (leftKnee.y + rightKnee.y) / 2;
-                let stanceHeight = kneeY - shoulderY;
-
-                // Threshold for "Standing up too straight"
-                if (stanceHeight > 220) {
-                    feedbackEl.innerHTML = "<span class='status-good'>Good Stance</span>";
-                    tipEl.innerText = "Knees bent. Ready to drive.";
-                } else {
-                    feedbackEl.innerHTML = "<span class='status-bad'>Too Upright</span>";
-                    tipEl.innerText = "Bend your knees for better balance!";
-                }
-
+            // If d is large, legs are straight. If d is small, knees are bent.
+            // Note: Threshold 200 is a guess, adjust based on camera distance
+            if (d > 250) {
+                main.innerText = "Knees too Straight";
+                main.className = "bad";
+                sub.innerText = "Bend your knees to activate your stance!";
             } else {
-                // Bowling Logic: High Arm
-                if (rightWrist.score > 0.3 && nose.score > 0.3) {
-                    if (rightWrist.y < nose.y) {
-                         feedbackEl.innerHTML = "<span class='status-good'>High Arm!</span>";
-                         tipEl.innerText = "Excellent release point.";
-                    } else {
-                        feedbackEl.innerHTML = "<span class='status-bad'>Low Arm</span>";
-                        tipEl.innerText = "Get your arm higher near your ear.";
+                main.innerText = "Good Stance";
+                main.className = "good";
+                sub.innerText = "Perfect. Eyes on the ball.";
+            }
+        }
+
+        function doBowlingLogic(pose) {
+            let wrist = pose.rightWrist;
+            let nose = pose.nose;
+            
+            let main = document.getElementById('main-feedback');
+            let sub = document.getElementById('sub-feedback');
+
+            if (wrist.y < nose.y) {
+                 main.innerText = "High Arm Action!";
+                 main.className = "good";
+                 sub.innerText = "Keep it up!";
+            } else {
+                 main.innerText = "Arm Too Low";
+                 main.className = "bad";
+                 sub.innerText = "Get that arm up by your ear.";
+            }
+        }
+
+        function drawKeypoints() {
+            for (let i = 0; i < poses.length; i++) {
+                let pose = poses[i].pose;
+                for (let j = 0; j < pose.keypoints.length; j++) {
+                    let keypoint = pose.keypoints[j];
+                    if (keypoint.score > 0.2) {
+                        fill(244, 208, 63);
+                        noStroke();
+                        ellipse(keypoint.position.x, keypoint.position.y, 10, 10);
                     }
                 }
             }
         }
 
-        // --- DRAWING SKELETON ---
-        function drawSkeleton(keypoints) {
-            // Draw Dots
-            noStroke();
-            fill(244, 208, 63); // Gold
-            for (let p of keypoints) {
-                if (p.score > 0.3) {
-                    circle(p.x, p.y, 10);
-                }
-            }
-
-            // Draw Lines (Simple connections)
-            stroke(255);
-            strokeWeight(2);
-            connectParts(keypoints, 'left_shoulder', 'right_shoulder');
-            connectParts(keypoints, 'left_shoulder', 'left_elbow');
-            connectParts(keypoints, 'left_elbow', 'left_wrist');
-            connectParts(keypoints, 'right_shoulder', 'right_elbow');
-            connectParts(keypoints, 'right_elbow', 'right_wrist');
-            connectParts(keypoints, 'left_shoulder', 'left_hip');
-            connectParts(keypoints, 'right_shoulder', 'right_hip');
-        }
-
-        function connectParts(keypoints, name1, name2) {
-            let p1 = keypoints.find(k => k.name === name1);
-            let p2 = keypoints.find(k => k.name === name2);
-            if (p1 && p2 && p1.score > 0.3 && p2.score > 0.3) {
-                line(p1.x, p1.y, p2.x, p2.y);
-            }
-        }
-
-        function setMode(mode) {
-            currentMode = mode;
-            document.getElementById('mode-display').innerText = mode.charAt(0).toUpperCase() + mode.slice(1) + " Analysis";
-            
-            // Toggle Buttons
-            document.getElementById('batBtn').className = mode === 'batting' ? 'btn-bat btn-active' : 'btn-bat';
-            document.getElementById('bowlBtn').className = mode === 'bowling' ? 'btn-bowl btn-active' : 'btn-bowl';
+        function setMode(m) {
+            mode = m;
+            document.getElementById('btn-bat').className = (m==='batting'?'active':'');
+            document.getElementById('btn-bowl').className = (m==='bowling'?'active':'');
+            log("Switched to " + m + " mode.");
         }
     </script>
 </body>
 </html>
-
