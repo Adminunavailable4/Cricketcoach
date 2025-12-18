@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pro Bowling Coach</title>
+    <style>
+        body {
+            background: #0d0d0d;
+            color: #fff;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* Camera Viewport */
+        #cam-view {
+            position: relative;
+            width: 100vw;
+            height: 65vh;
+            background: #1a1a1a;
+            border-bottom: 4px solid #ff4757; /* Bowling Red */
+            overflow: hidden;
+        }
+
+        video { width: 100%; height: 100%; object-fit: cover; }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+
+        /* HUD Overlay */
+        #hud-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+        }
+
+        /* Speedometer Bar */
+        #momentum-bar-container {
+            position: absolute; top: 20px; right: 20px;
+            width: 20px; height: 150px;
+            background: rgba(0,0,0,0.5);
+            border: 1px solid #fff;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        #momentum-fill {
+            width: 100%; height: 0%;
+            background: linear-gradient(to top, #ff4757, #ffa502);
+            position: absolute; bottom: 0;
+            transition: height 0.1s;
+        }
+        #momentum-label {
+            position: absolute; top: 180px; right: 10px;
+            font-size: 10px; text-transform: uppercase; color: #aaa;
+        }
+
+        /* Main Feedback Text */
+        #feedback-display {
+            position: absolute; bottom: 30px; left: 0; width: 100%;
+            text-align: center; text-shadow: 2px 2px 4px #000;
+        }
+        #action-text { font-size: 32px; font-weight: 800; font-style: italic; }
+        #tip-text { font-size: 16px; color: #ddd; margin-top: 5px; }
+
+        /* Dashboard */
+        #analysis-panel {
+            height: 35vh; width: 100%;
+            background: #121212;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 1px;
+        }
+        .metric-box {
+            background: #1e1e1e;
+            display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+            border: 1px solid #333;
+        }
+        .m-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+        .m-value { font-size: 24px; font-weight: bold; color: #fff; margin-top: 5px; }
+        
+        .good { color: #2ecc71; }
+        .warn { color: #f1c40f; }
+        .bad { color: #ff4757; }
+
+        /* Calibration Screen */
+        #setup-screen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85);
+            display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+            z-index: 100; text-align: center; padding: 20px; box-sizing: border-box;
+        }
+        .target-circle {
+            width: 60px; height: 60px;
+            border: 4px dashed #ff4757; border-radius: 50%;
+            margin-bottom: 20px;
+            animation: spin 4s linear infinite;
+        }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+    </style>
+</head>
+<body>
+
+    <div id="cam-view" onclick="lockTarget(event)">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="canvas"></canvas>
+        
+        <div id="hud-layer">
+            <div id="momentum-bar-container"><div id="momentum-fill"></div></div>
+            <div id="momentum-label">Run-Up<br>Speed</div>
+            
+            <div id="feedback-display">
+                <div id="action-text">WAITING...</div>
+                <div id="tip-text"></div>
+            </div>
+        </div>
+
+        <div id="setup-screen">
+            <div class="target-circle"></div>
+            <h2 style="color:#ff4757; margin:0;">CALIBRATION</h2>
+            <p style="color:#ddd; font-size:14px; line-height:1.5;">
+                Wear a <b>Bright Wristband</b> or hold the <b>Ball</b>.<br><br>
+                1. Stand at the crease.<br>
+                2. Tap the WRISTBAND on screen to lock on.
+            </p>
+        </div>
+    </div>
+
+    <div id="analysis-panel">
+        <div class="metric-box">
+            <span class="m-label">Release Height</span>
+            <span class="m-value" id="height-val">--</span>
+        </div>
+        <div class="metric-box">
+            <span class="m-label">Arm Speed</span>
+            <span class="m-value" id="speed-val">--</span>
+        </div>
+        <div class="metric-box">
+            <span class="m-label">Wicket Potential</span>
+            <span class="m-value" id="threat-val">--</span>
+        </div>
+        <div class="metric-box" style="background:#111;">
+            <span class="m-label">Coach's Call</span>
+            <span class="m-value" id="coach-call" style="font-size:16px; color:#aaa;">Ready</span>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // UI Elements
+        const actionText = document.getElementById('action-text');
+        const tipText = document.getElementById('tip-text');
+        const momentumFill = document.getElementById('momentum-fill');
+        
+        // Tracking Variables
+        let targetColor = { r:0, g:0, b:0 };
+        let isTracking = false;
+        let lastPos = { x:0, y:0, t:0 };
+        
+        // Physics Engine Variables
+        let history = []; 
+        let phase = "RUNUP"; // Phases: RUNUP -> LOAD -> DELIVERY -> FOLLOWTHROUGH
+        let maxArmHeight = 1000; // y-coordinate (smaller is higher)
+        let maxVelocity = 0;
+        
+        // 1. Start Camera (Back Camera preferred for bowling)
+        navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: 'environment', width: {ideal: 1280}, height: {ideal: 720} }, 
+            audio: false 
+        }).then(stream => {
+            video.srcObject = stream;
+            video.onloadedmetadata = () => {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                requestAnimationFrame(loop);
+            };
+        }).catch(e => alert("Camera blocked. Please allow access."));
+
+        // 2. Lock Target Logic
+        function lockTarget(e) {
+            if(isTracking) return;
+
+            const rect = video.getBoundingClientRect();
+            const scaleX = video.videoWidth / rect.width;
+            const scaleY = video.videoHeight / rect.height;
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+
+            // Sample color from video frame
+            const hCanvas = document.createElement('canvas');
+            hCanvas.width = video.videoWidth; hCanvas.height = video.videoHeight;
+            const hCtx = hCanvas.getContext('2d');
+            hCtx.drawImage(video, 0, 0);
+            const p = hCtx.getImageData(x, y, 1, 1).data;
+
+            targetColor = { r:p[0], g:p[1], b:p[2] };
+            isTracking = true;
+            document.getElementById('setup-screen').style.display = 'none';
+            actionText.innerText = "START RUN-UP";
+            actionText.style.color = "#fff";
+        }
+
+        // 3. Main Loop
+        function loop() {
+            if(isTracking) {
+                const pos = findObject();
+                if(pos) {
+                    drawTracker(pos);
+                    analyzeBowlingMechanics(pos);
+                }
+            }
+            requestAnimationFrame(loop);
+        }
+
+        // 4. Color Search (Optimized)
+        function findObject() {
+            const w = canvas.width / 4; 
+            const h = canvas.height / 4;
+            const hCanvas = document.createElement('canvas');
+            hCanvas.width = w; hCanvas.height = h;
+            const hCtx = hCanvas.getContext('2d');
+            hCtx.drawImage(video, 0, 0, w, h);
+            const data = hCtx.getImageData(0,0,w,h).data;
+            
+            let sumX=0, sumY=0, count=0;
+            // Scan every 4th pixel for speed
+            for(let i=0; i<data.length; i+=16) {
+                const r=data[i], g=data[i+1], b=data[i+2];
+                const diff = Math.abs(r-targetColor.r) + Math.abs(g-targetColor.g) + Math.abs(b-targetColor.b);
+                if(diff < 60) {
+                    sumX += (i/4)%w; sumY += Math.floor((i/4)/w); count++;
+                }
+            }
+            if(count > 5) return { x: (sumX/count)*4, y: (sumY/count)*4, t: Date.now() };
+            return null;
+        }
+
+        // 5. THE BOWLING COACH LOGIC
+        function analyzeBowlingMechanics(pos) {
+            // Calculate instantaneous velocity
+            let dt = pos.t - lastPos.t;
+            if(dt === 0) dt = 1;
+            let dist = Math.sqrt(Math.pow(pos.x - lastPos.x, 2) + Math.pow(pos.y - lastPos.y, 2));
+            let velocity = dist / dt; // Pixels per ms
+            
+            // Smoothing
+            if (velocity > 10) velocity = 10; // Cap glitches
+
+            // Update UI Bar for Run-up Momentum
+            let momentumPct = Math.min(velocity * 25, 100); 
+            momentumFill.style.height = momentumPct + "%";
+            
+            // --- STATE MACHINE ---
+            
+            // PHASE 1: RUN-UP (Checking horizontal speed)
+            if (phase === "RUNUP") {
+                if (momentumPct > 40) {
+                    actionText.innerText = "RUNNING IN...";
+                    actionText.style.color = "#f1c40f";
+                }
+                // Detect the "Gather" (Arm goes up before delivery)
+                // If Y moves UP significantly (value decreases)
+                if (pos.y < lastPos.y - 10 && momentumPct > 20) {
+                    phase = "DELIVERY";
+                    maxArmHeight = pos.y; // Init height
+                    maxVelocity = 0;
+                }
+            }
+
+            // PHASE 2: DELIVERY STRIDE (The Action)
+            else if (phase === "DELIVERY") {
+                actionText.innerText = "ACTION!";
+                actionText.style.color = "#ff4757";
+
+                // Track Max Height (Lowest Y value)
+                if (pos.y < maxArmHeight) {
+                    maxArmHeight = pos.y;
+                }
+                // Track Max Arm Speed
+                if (velocity > maxVelocity) {
+                    maxVelocity = velocity;
+                }
+
+                // Detect Release (Arm starts coming down fast)
+                if (pos.y > maxArmHeight + 100) {
+                    finishDelivery();
+                    phase = "COOLDOWN";
+                }
+            }
+
+            // PHASE 3: COOLDOWN (Reset after 3 seconds)
+            else if (phase === "COOLDOWN") {
+                // Do nothing, just wait
+                if (Date.now() - lastPos.t > 3000) {
+                    phase = "RUNUP";
+                    resetUI();
+                }
+            }
+
+            lastPos = pos;
+        }
+
+        function finishDelivery() {
+            // 1. Calculate Release Height Score (0 = Top of screen, 100% = Bottom)
+            // A high arm release is usually in the top 20-30% of the screen
+            let heightPct = (maxArmHeight / canvas.height) * 100;
+            let heightScore = "";
+            let hValDisplay = document.getElementById('height-val');
+
+            if (heightPct < 25) {
+                heightScore = "HIGH";
+                hValDisplay.innerHTML = "<span class='good'>HIGH</span>";
+            } else if (heightPct < 45) {
+                heightScore = "MID";
+                hValDisplay.innerHTML = "<span class='warn'>MID</span>";
+            } else {
+                heightScore = "LOW"; // Lasith Malinga style or round arm
+                hValDisplay.innerHTML = "<span class='bad'>LOW</span>";
+            }
+
+            // 2. Calculate Arm Speed Score
+            let sValDisplay = document.getElementById('speed-val');
+            let speedScore = "";
+            
+            // Velocity thresholds depend on camera resolution, these are heuristic
+            if (maxVelocity > 2.5) {
+                speedScore = "FAST";
+                sValDisplay.innerHTML = "<span class='good'>FAST</span>";
+            } else {
+                speedScore = "MED";
+                sValDisplay.innerHTML = "<span class='warn'>MED</span>";
+            }
+
+            // 3. Wicket Taking Logic (The Expert Analysis)
+            let threatVal = document.getElementById('threat-val');
+            let coachCall = document.getElementById('coach-call');
+            
+            if (heightScore === "HIGH" && speedScore === "FAST") {
+                threatVal.innerHTML = "🔥 HIGH";
+                coachCall.innerText = "Perfect bounce! Good length hit possible.";
+                actionText.innerText = "GREAT BALL!";
+            } else if (heightScore === "HIGH" && speedScore === "MED") {
+                threatVal.innerHTML = "⚠️ MED";
+                coachCall.innerText = "Good loop. Flighted delivery/Spinner?";
+                actionText.innerText = "NICE LOOP";
+            } else if (heightScore === "LOW" && speedScore === "FAST") {
+                threatVal.innerHTML = "🎯 SLING";
+                coachCall.innerText = "Skiddy delivery. Aim for Yorker.";
+                actionText.innerText = "SLING ACTION";
+            } else {
+                threatVal.innerHTML = "❄️ LOW";
+                coachCall.innerText = "Arm too low & slow. Easy to hit.";
+                actionText.innerText = "FIX ACTION";
+            }
+            
+            // Reset state logic
+            setTimeout(() => { phase = "RUNUP"; }, 4000);
+        }
+
+        function resetUI() {
+            actionText.innerText = "NEXT BALL";
+            actionText.style.color = "#fff";
+        }
+
+        function drawTracker(pos) {
+            ctx.clearRect(0,0,canvas.width,canvas.height);
+            
+            // Target Reticle
+            ctx.strokeStyle = "#ff4757";
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, 20, 0, Math.PI*2);
+            ctx.stroke();
+
+            // Crosshair
+            ctx.beginPath();
+            ctx.moveTo(pos.x - 25, pos.y); ctx.lineTo(pos.x + 25, pos.y);
+            ctx.moveTo(pos.x, pos.y - 25); ctx.lineTo(pos.x, pos.y + 25);
+            ctx.stroke();
+        }
+
+    </script>
+</body>
+</html>

@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pro Batting Coach (Color Lock)</title>
+    <style>
+        body {
+            background: #000;
+            color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            margin: 0;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* Video Container */
+        #cam-view {
+            position: relative;
+            width: 100vw;
+            height: 70vh;
+            background: #111;
+            border-bottom: 2px solid #00f3ff;
+        }
+
+        video { width: 100%; height: 100%; object-fit: cover; }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+
+        /* Coaching Overlay */
+        #coach-feedback {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            text-align: center;
+            text-shadow: 2px 2px 0 #000;
+            pointer-events: none;
+        }
+        #main-msg { font-size: 28px; font-weight: bold; color: #fff; }
+        #sub-msg { font-size: 16px; color: #00f3ff; margin-top: 5px; }
+
+        /* Dashboard */
+        #stats-panel {
+            height: 30vh;
+            width: 100%;
+            background: #050505;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            align-items: center;
+            text-align: center;
+            border-top: 1px solid #333;
+        }
+        
+        .stat-box { padding: 10px; border-right: 1px solid #222; }
+        .stat-label { font-size: 10px; color: #888; text-transform: uppercase; }
+        .stat-val { font-size: 20px; color: #f4d03f; font-weight: bold; }
+
+        /* Setup Guide */
+        #setup-guide {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 99;
+            text-align: center;
+        }
+        .color-dot {
+            width: 40px; height: 40px; border: 3px solid #fff; border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse { 0% {transform: scale(1);} 50% {transform: scale(1.2);} 100% {transform: scale(1);} }
+
+    </style>
+</head>
+<body>
+
+    <div id="cam-view" onclick="lockColor(event)">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="canvas"></canvas>
+        
+        <div id="coach-feedback">
+            <div id="main-msg">WAITING...</div>
+            <div id="sub-msg">Tap your bat handle/glove to start</div>
+        </div>
+
+        <div id="setup-guide">
+            <div class="color-dot"></div>
+            <h2 style="color:#f4d03f">STEP 1: CALIBRATE</h2>
+            <p>Stand in your batting stance.<br>Tap on your <b>GLOVE</b> or <b>BAT HANDLE</b><br>on the screen.</p>
+        </div>
+    </div>
+
+    <div id="stats-panel">
+        <div class="stat-box">
+            <div class="stat-label">Phase</div>
+            <div class="stat-val" id="phase-val">STANCE</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Backlift</div>
+            <div class="stat-val" id="lift-val">--</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Shot</div>
+            <div class="stat-val" id="shot-val">--</div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const mainMsg = document.getElementById('main-msg');
+        const subMsg = document.getElementById('sub-msg');
+
+        let targetRGB = { r:0, g:0, b:0 };
+        let isTracking = false;
+        
+        // COACHING VARIABLES
+        let history = []; // Stores path of the bat
+        let state = "STANCE"; // States: STANCE -> BACKLIFT -> SHOT -> FOLLOWTHROUGH
+        let stanceStability = 0;
+        let maxBackliftY = 1000; // Tracks highest point of bat
+
+        // 1. INIT CAMERA
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
+            .then(stream => {
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    loop();
+                };
+            });
+
+        // 2. COLOR LOCK FUNCTION
+        function lockColor(e) {
+            if(isTracking) return; // Prevent double clicks
+            
+            // Get click position
+            const rect = video.getBoundingClientRect();
+            const x = (e.clientX - rect.left) * (video.videoWidth / rect.width);
+            const y = (e.clientY - rect.top) * (video.videoHeight / rect.height);
+            
+            // Read pixel color
+            const hiddenCanvas = document.createElement('canvas');
+            hiddenCanvas.width = video.videoWidth;
+            hiddenCanvas.height = video.videoHeight;
+            const hCtx = hiddenCanvas.getContext('2d');
+            hCtx.drawImage(video, 0, 0);
+            const p = hCtx.getImageData(x, y, 1, 1).data;
+
+            targetRGB = { r: p[0], g: p[1], b: p[2] };
+            isTracking = true;
+            document.getElementById('setup-guide').style.display = 'none';
+            mainMsg.innerText = "COACH ACTIVE";
+            subMsg.innerText = "Show me your stance";
+        }
+
+        // 3. MAIN TRACKING LOOP
+        function loop() {
+            if(isTracking) {
+                // Find the object
+                const pos = findColor();
+                
+                if(pos) {
+                    // Update visual tracker
+                    ctx.clearRect(0,0,canvas.width,canvas.height);
+                    ctx.beginPath();
+                    ctx.strokeStyle = "#00f3ff";
+                    ctx.lineWidth = 4;
+                    ctx.arc(pos.x, pos.y, 20, 0, Math.PI*2);
+                    ctx.stroke();
+
+                    // RUN COACHING LOGIC
+                    runCoachingAI(pos.x, pos.y);
+                }
+            }
+            requestAnimationFrame(loop);
+        }
+
+        // 4. FIND COLOR (Simple Computer Vision)
+        function findColor() {
+            // Draw small version for speed
+            const w = canvas.width / 4; // Downscale 4x for speed
+            const h = canvas.height / 4;
+            
+            const hCanvas = document.createElement('canvas');
+            hCanvas.width = w; hCanvas.height = h;
+            const hCtx = hCanvas.getContext('2d');
+            hCtx.drawImage(video, 0, 0, w, h);
+            
+            const frame = hCtx.getImageData(0, 0, w, h);
+            const data = frame.data;
+            
+            let sumX=0, sumY=0, count=0;
+            
+            for(let i=0; i<data.length; i+=4) {
+                const r=data[i], g=data[i+1], b=data[i+2];
+                // Color Distance
+                const dist = Math.abs(r - targetRGB.r) + Math.abs(g - targetRGB.g) + Math.abs(b - targetRGB.b);
+                if(dist < 50) { // Tolerance
+                    sumX += (i/4) % w;
+                    sumY += Math.floor((i/4) / w);
+                    count++;
+                }
+            }
+            
+            if(count > 10) {
+                return { x: (sumX/count)*4, y: (sumY/count)*4 }; // Upscale coordinates back
+            }
+            return null;
+        }
+
+        // 5. THE COACHING BRAIN (Logic Engine)
+        function runCoachingAI(x, y) {
+            history.push({x, y, t: Date.now()});
+            if(history.length > 30) history.shift(); // Keep last 30 frames
+
+            // Draw Trail
+            ctx.beginPath();
+            ctx.moveTo(history[0].x, history[0].y);
+            for(let p of history) ctx.lineTo(p.x, p.y);
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+            ctx.stroke();
+
+            const hPercent = (y / canvas.height) * 100; // 0% (Top) to 100% (Bottom)
+
+            // --- PHASE 1: STANCE CHECK ---
+            if (state === "STANCE") {
+                document.getElementById('phase-val').innerText = "STANCE";
+                
+                // Is Bat stable? (Check if X and Y haven't moved much in last 10 frames)
+                let isStable = checkStability();
+                
+                if (isStable) {
+                    stanceStability++;
+                    // Bat should be around waist height (40-60%)
+                    if (hPercent > 40 && hPercent < 70) {
+                        mainMsg.innerText = "STANCE GOOD";
+                        mainMsg.style.color = "#0f0";
+                        subMsg.innerText = "Head still. Lift bat to trigger shot.";
+                    } else if (hPercent < 40) {
+                        mainMsg.innerText = "HANDS TOO HIGH";
+                        mainMsg.style.color = "yellow";
+                    } else {
+                        mainMsg.innerText = "HANDS TOO LOW";
+                        mainMsg.style.color = "yellow";
+                    }
+                } else {
+                    stanceStability = 0;
+                    // If Bat moves UP significantly, switch to BACKLIFT phase
+                    if (hPercent < 40) {
+                        state = "BACKLIFT";
+                        maxBackliftY = y; // Reset max height
+                    }
+                }
+            }
+
+            // --- PHASE 2: BACKLIFT ---
+            if (state === "BACKLIFT") {
+                document.getElementById('phase-val').innerText = "BACKLIFT";
+                
+                // Track highest point
+                if (y < maxBackliftY) maxBackliftY = y;
+                
+                let liftScore = Math.floor((1 - (maxBackliftY / canvas.height)) * 100);
+                document.getElementById('lift-val').innerText = liftScore + "%";
+
+                if (liftScore > 70) {
+                     subMsg.innerText = "Great High Backlift!";
+                }
+
+                // Detect Downswing (Shot started)
+                // If bat moves DOWN rapidly
+                if (y > maxBackliftY + 100) {
+                    state = "SHOT";
+                    analyzeShot();
+                }
+            }
+            
+            // --- PHASE 3: SHOT ANALYSIS ---
+            if (state === "SHOT") {
+                // Wait for follow through (1 sec) then reset
+                setTimeout(() => { state = "STANCE"; }, 2000);
+            }
+        }
+
+        function checkStability() {
+            if (history.length < 10) return false;
+            let start = history[history.length-10];
+            let end = history[history.length-1];
+            let diff = Math.abs(start.x - end.x) + Math.abs(start.y - end.y);
+            return diff < 30; // Moved less than 30 pixels
+        }
+
+        function analyzeShot() {
+            // Look at the vector from Start of downswing to End
+            let start = history[history.length - 10]; // Top of backlift
+            let end = history[history.length - 1];   // Current low point
+            
+            let dx = end.x - start.x;
+            let dy = end.y - start.y;
+
+            let shotName = "";
+            
+            // Logic: Analyze direction vector
+            if (Math.abs(dx) < 50) {
+                shotName = "STRAIGHT DRIVE";
+                mainMsg.style.color = "#0f0"; // Green
+                subMsg.innerText = "Beautiful presentation of the full face!";
+            } else if (dx > 50) {
+                // Moved Right (Mirror view = Left for user) -> OFF SIDE
+                shotName = "COVER DRIVE";
+                mainMsg.style.color = "#00f3ff"; // Blue
+                subMsg.innerText = "Classic shot through the covers.";
+            } else if (dx < -50) {
+                // Moved Left (Mirror view = Right for user) -> ON SIDE
+                shotName = "FLICK / ON-DRIVE";
+                mainMsg.style.color = "#f4d03f"; // Gold
+                subMsg.innerText = "Good use of wrists.";
+            }
+
+            mainMsg.innerText = shotName;
+            document.getElementById('shot-val').innerText = shotName;
+            document.getElementById('phase-val').innerText = "FINISH";
+        }
+
+    </script>
+</body>
+</html>
